@@ -30,87 +30,148 @@ const int MotionPin = 11;
 //Motor
 const int MotorPin = 13;
 
+//Magnetic sensor
+const int MagnetPin;
+
+//Distance sensor
+const int DistanceEchoPin, DistanceTrigPin;
+
+//Light sensor
+const int LightPin;
+
 //LCD Text variables
 String lcdtext1 = "", lcdtext2 = "";
 
 //Timer
-int temptimer = 2000;
-int timer = 0; //timer in milis()
+int temptimer = 2000; //timer for temperature
+int timer = 0; //timer in millis() after motion detected
+int SprayTimer; //store millis() into this variable
 
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //Setup function
 void setup() {
+  //Begin some stuff
   Serial.begin(9600);
   sensors.begin();
+  lcd.begin(16,2);
+
+  //pinModes
   pinMode(ButtonPin1, INPUT);
   pinMode(ButtonPin2, INPUT);
   pinMode(ButtonPin3, INPUT);
-  lcd.begin(16,2);
-
-  //pinMode(MotionPin, INPUT);
-  //pinMode(MotionLight, OUTPUT);
+  
+  pinMode(MotionPin, INPUT);
+  
   pinMode(MotorPin, OUTPUT);
+
+  pinMode(MagnetPin, INPUT);
+
+  pinMode(DistanceEchoPin, INPUT);
+  pinMode(DistanceTrigPin, OUTPUT);
+
+  pinMode(LightPin, INPUT);
 }
 
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //Loop Function
 void loop() {
-  if(ButtonPressed(1)){
-    if(settings == 0) settings = 1;
-    else settings = settings%3+1;
-    settingstimer = 0;
+  // -- Change State based on inputs
+  //Check if motion is detected and change to active
+  if(MotionDetected()){
+    State = 1;
   }
-  
-  if(settings > 0) Settings();
-  else NormalMode();
 
-}
-
-
-//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-//When a number1 is detected (pee)
-void Number1(){
-  State = 2;
-  ShowMessage("Peeing",0);
-}
+  //SettingsMode
+  if(ButtonPressed(1)){
+    State = 6;
+    if(settings == 0) settings = 1;
+  }
 
 
-//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-//When a number2 is detected (poo)
-void Number2(){
-  State = 3;
-  ShowMessage("Pooing",0);
-}
 
-
-//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-//When the toilet is being cleaned or anything else which is not a nmr1 nor nmr2
-void CleaningToilet(){
-  State = 4;
-  ShowMessage("Cleaning Toilet",0);
+  // -- Loop based on State
+  if(State == 0){
+    NormalMode();
+  }
+  else if(State == 1){
+    
+  }
+  else if(State == 2){
+    Number1();
+  }
+  else if(State == 3){
+    Number2();
+  }
+  else if(State == 4){
+    CleaningToilet();
+  }
+  else if(State == 5){
+    Trigger();
+  }
+  else if(State == 6){
+    Settings();
+  }
 }
 
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //When nothing is happening
 void NormalMode(){
-  ShowMessage(GetState(),0);
-  GetTemperature();
+  String mystate = GetState();
+  ShowMessage(mystate, 0);
 
-  if(MotionDetected()){
-    State = 1;
+  //temperature updater (every 1000ms)
+  temptimer = millis();
+  if(temptimer > 1000){
+    GetTemperature();
+    temptimer = 0;
   }
+}
+
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+//When a number1 is detected (pee)
+void Number1(){
+  String mystate = GetState();
+  ShowMessage(mystate, 0);
+}
+
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+//When a number2 is detected (poo)
+void Number2(){
+  String mystate = GetState();
+  ShowMessage(mystate, 0);
+}
+
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+//When the toilet is being cleaned or anything else which is not a nmr1 nor nmr2
+void CleaningToilet(){
+  String mystate = GetState();
+  ShowMessage(mystate, 0);
+}
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+//When Spray should be triggered
+void Trigger(){
+  String mystate = GetState();
+  ShowMessage(mystate, 0);
 }
 
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //When in settings mode
 void Settings(){
-  State = 6;
   Serial.println(settings);
   settingstimer++;
+
+  if(ButtonPressed(1)){
+    settings = settings%3+1;
+    settingstimer = 0;
+  }
   
   if(settingstimer > 3000){
     settings = 0;
@@ -130,7 +191,7 @@ void Settings(){
     ShowMessage(String(SprayingDelay), 1);
 
     if(ButtonPressed(2)){
-      SprayingDelay = (SprayingDelay+1)%10;
+      SprayingDelay = (SprayingDelay+1)%10+15;
     }
   }
     
@@ -148,8 +209,14 @@ void Settings(){
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //Function to spray x times
 void Spray(int amount){
-  if(amount == 1){
-    
+  if(SprayTimer == 0) SprayTimer = millis();
+  if(millis() > SprayTimer +  SprayingDelay*1000){
+    digitalWrite(MotorPin, HIGH);
+  }
+  if(millis() > SprayTimer + 20000*amount +  SprayingDelay*1000){
+    digitalWrite(MotorPin, LOW);
+    SprayTimer = 0;
+    State = 0;
   }
 }
 
@@ -170,6 +237,46 @@ float GetTemperature(){
 bool MotionDetected(){
   int pirvalue = digitalRead(MotionPin);
   if(pirvalue == 1) return true;
+  return false;
+}
+
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+//Get distance
+float GetDistance(){
+  digitalWrite(DistanceTrigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(DistanceTrigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(DistanceTrigPin, LOW);
+  float duration = pulseIn(DistanceEchoPin, HIGH);
+  float distance = duration*0.034/2;
+  return distance;
+}
+
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+//Is light on or off
+bool GetLight(){
+  if(digitalRead(LightPin) == HIGH){
+    return true;
+  }
+  return false;
+}
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+//How much light
+float GetLightValue(){
+  return analogRead(LightPin);
+}
+
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+//Door or Toilet seat open or closed
+bool GetMagneticState(){
+  if(digitalRead(MagnetPin) == HIGH){
+    return true;
+  }
   return false;
 }
 
@@ -236,11 +343,11 @@ bool ButtonPressed(int button){
 //GetState
 String GetState(){ //return current state
   if(State == 0) return "not in use";
-  else if(State == 1) return "in use - unkown";
-  else if(State == 2) return "in use - pee";
-  else if(State == 3) return "in use - poo";
-  else if(State == 4) return "in use - cleaning";
+  else if(State == 1) return "in use-unkown";
+  else if(State == 2) return "in use-pee";
+  else if(State == 3) return "in use-poo";
+  else if(State == 4) return "in use-cleaning";
   else if(State == 5) return "triggered";
-  else if(State == 6) return "operator menu active";
+  else if(State == 6) return "Settings";
   else return "Something went wrong";
 }
