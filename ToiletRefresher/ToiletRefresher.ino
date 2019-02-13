@@ -31,19 +31,22 @@ const int MotionPin = 11;
 const int MotorPin = 13;
 
 //Magnetic sensor
-const int MagnetPin;
+const int MagnetPin = 12;
 
 //Distance sensor
 const int DistanceEchoPin, DistanceTrigPin;
 
 //Light sensor
-const int LightPin;
+const int LightPin = A1;
+
+//RGB light
+const int RedPin = A2, GreenPin = A3, BluePin = A4;
 
 //LCD Text variables
 String lcdtext1 = "", lcdtext2 = "";
 
 //Timer
-int temptimer = 2000; //timer for temperature
+unsigned long temptimer = 0; //timer for temperature
 int timer = 0; //timer in millis() after motion detected
 int SprayTimer; //store millis() into this variable
 
@@ -71,6 +74,10 @@ void setup() {
   pinMode(DistanceTrigPin, OUTPUT);
 
   pinMode(LightPin, INPUT);
+
+  pinMode(RedPin, OUTPUT);
+  pinMode(GreenPin, OUTPUT);
+  pinMode(BluePin, OUTPUT);
 }
 
 
@@ -78,25 +85,23 @@ void setup() {
 //Loop Function
 void loop() {
   // -- Change State based on inputs
-  //Check if motion is detected and change to active
-  if(MotionDetected()){
-    State = 1;
-  }
 
   //SettingsMode
   if(ButtonPressed(1)){
     State = 6;
+    settingstimer = millis()/1000;
     if(settings == 0) settings = 1;
+    else{
+      settings = settings%3+1;
+    }
   }
-
-
 
   // -- Loop based on State
   if(State == 0){
     NormalMode();
   }
   else if(State == 1){
-    
+    NotSure();
   }
   else if(State == 2){
     Number1();
@@ -119,63 +124,86 @@ void loop() {
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //When nothing is happening
 void NormalMode(){
+  SetColorLight(255,0,0);
   String mystate = GetState();
   ShowMessage(mystate, 0);
 
-  //temperature updater (every 1000ms)
-  temptimer = millis();
-  if(temptimer > 1000){
-    GetTemperature();
-    temptimer = 0;
+  //Check if motion is detected and change to active
+  if(MotionDetected()){
+    //State = 1;
   }
+
+  if(GetMagneticState()){
+    State = 2;
+  }
+
+  //temperature updater (every 1000ms)
+  if(millis()/1000-temptimer >= 1){
+    GetTemperature();
+    temptimer = millis()/1000;
+  }
+}
+
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+//in use but not sure what person is doing
+void NotSure(){
+  SetColorLight(255,255,255);
+  String mystate = GetState();
+  ShowMessage(mystate, 0);
+  ShowMessage(" ", 1);
 }
 
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //When a number1 is detected (pee)
 void Number1(){
+  SetColorLight(0,255,0);
   String mystate = GetState();
   ShowMessage(mystate, 0);
+  ShowMessage(" ", 1);
 }
 
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //When a number2 is detected (poo)
 void Number2(){
+  SetColorLight(0,0,255);
   String mystate = GetState();
   ShowMessage(mystate, 0);
+  ShowMessage(" ", 1);
 }
 
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //When the toilet is being cleaned or anything else which is not a nmr1 nor nmr2
 void CleaningToilet(){
+  SetColorLight(255,255,0);
   String mystate = GetState();
   ShowMessage(mystate, 0);
+  ShowMessage(" ", 1);
 }
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //When Spray should be triggered
 void Trigger(){
+  SetColorLight(255,0,255);
   String mystate = GetState();
   ShowMessage(mystate, 0);
+  ShowMessage(" ", 1);
 }
 
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //When in settings mode
 void Settings(){
-  Serial.println(settings);
-  settingstimer++;
+  SetColorLight(0,255,255);
 
-  if(ButtonPressed(1)){
-    settings = settings%3+1;
-    settingstimer = 0;
-  }
-  
-  if(settingstimer > 3000){
+  //Change back to normal mode after 5 seconds of not pressing any settings button
+  if(millis()/1000-settingstimer > 5){
     settings = 0;
-    ShowMessage(" ",1);
+    settingstimer = 0;
+    State = 0;
   }
 
   if(settings == 1){
@@ -184,14 +212,16 @@ void Settings(){
     
     if(ButtonPressed(2)){
       SpraysLeft = 2400;
+      settingstimer = millis()/1000;
     }
   }
   else if(settings == 2){
     ShowMessage("Change Spraying delay",0);
-    ShowMessage(String(SprayingDelay), 1);
+    ShowMessage(String(SprayingDelay+15), 1);
 
     if(ButtonPressed(2)){
-      SprayingDelay = (SprayingDelay+1)%10+15;
+      SprayingDelay = (SprayingDelay+1)%10;
+      settingstimer = millis()/1000;
     }
   }
     
@@ -199,8 +229,9 @@ void Settings(){
     ShowMessage("Settings3", 0);
     ShowMessage(" ",1);
 
-    if(ButtonPressed(3)){
+    if(ButtonPressed(2)){
       //do something
+      settingstimer = millis()/1000;
     }
   }
 }
@@ -215,6 +246,7 @@ void Spray(int amount){
   }
   if(millis() > SprayTimer + 20000*amount +  SprayingDelay*1000){
     digitalWrite(MotorPin, LOW);
+    SpraysLeft--;
     SprayTimer = 0;
     State = 0;
   }
@@ -226,7 +258,6 @@ void Spray(int amount){
 float GetTemperature(){
   sensors.requestTemperatures();
   float temperature = sensors.getTempCByIndex(0);
-  Serial.println(temperature);
   ShowMessage(String(temperature),1);
   return temperature;
 }
@@ -234,9 +265,9 @@ float GetTemperature(){
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //Check if motion is detected
-bool MotionDetected(){
+bool MotionDetected(){ 
   int pirvalue = digitalRead(MotionPin);
-  if(pirvalue == 1) return true;
+  if(pirvalue == HIGH) return true;
   return false;
 }
 
@@ -264,6 +295,7 @@ bool GetLight(){
   return false;
 }
 
+
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //How much light
 float GetLightValue(){
@@ -272,12 +304,21 @@ float GetLightValue(){
 
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-//Door or Toilet seat open or closed
+//Door or Toilet seat open or closed. true is open. false is closed
 bool GetMagneticState(){
   if(digitalRead(MagnetPin) == HIGH){
     return true;
   }
   return false;
+}
+
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+//Set color of the RGB light
+void SetColorLight(int R, int G, int B){
+  analogWrite(RedPin, R);
+  analogWrite(GreenPin, G);
+  analogWrite(BluePin, B);
 }
 
 
@@ -340,8 +381,8 @@ bool ButtonPressed(int button){
 
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-//GetState
-String GetState(){ //return current state
+//Return current state as String
+String GetState(){
   if(State == 0) return "not in use";
   else if(State == 1) return "in use-unkown";
   else if(State == 2) return "in use-pee";
