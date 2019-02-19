@@ -7,7 +7,7 @@
 LiquidCrystal lcd(7, 6, 5, 4, 3, 2);
 
 //Temperature sensor init
-#define ONE_WIRE_BUS 10
+#define ONE_WIRE_BUS A5 //A5 is the temperature pin
 OneWire oneWire(ONE_WIRE_BUS); 
 DallasTemperature sensors(&oneWire);
 
@@ -45,10 +45,24 @@ const int RedPin = A2, GreenPin = A3, BluePin = A4;
 //LCD Text variables
 String lcdtext1 = "", lcdtext2 = "";
 
-//Timer
+//Timers
 unsigned long temptimer = 0; //timer for temperature
-int timer = 0; //timer in millis() after motion detected
-int SprayTimer; //store millis() into this variable
+unsigned long timer = 0; //timer in millis() after motion detected
+unsigned long SprayTimer; //store millis() into this variable
+unsigned long notsuretimer = 0;
+unsigned long LastMovementTimer = 0;
+unsigned long DistanceResetTimer = 0;
+
+//PossibleActions array
+bool PossibleActions[3] = {true, true, true}; //in order: Pee, Poo, Cleaning (or other)
+
+//Other
+const float MaxPeeTime = 120; //Max pee time in seconds. If it takes longer than x seconds it's not peeing anymore
+const float NoMovementActivateTime = 60; //If there is x seconds no movement then activate something
+float NormalDistance;
+int PeeSprayCount = 1;
+int PooSprayCount = 2;
+bool SeatWasClosed = false;
 
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -78,22 +92,51 @@ void setup() {
   pinMode(RedPin, OUTPUT);
   pinMode(GreenPin, OUTPUT);
   pinMode(BluePin, OUTPUT);
+
+  //Other
+  MaxPeeTime += NoMovementActivateTime;
 }
 
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //Loop Function
 void loop() {
-  // -- Change State based on inputs
 
+  Serial.print(PossibleActions[0]);
+  Serial.print(PossibleActions[1]);
+  Serial.print(PossibleActions[2]);
+  Serial.println(" " + String(millis()/1000-notsuretimer) + "  " + String(NoMovement()));
+  
+  // -- Change State based on inputs
   //SettingsMode
   if(ButtonPressed(1)){
     State = 6;
     settingstimer = millis()/1000;
     if(settings == 0) settings = 1;
     else{
-      settings = settings%3+1;
+      settings = settings%4+1; //increase x in %x to add another setting (and add it in settings function)
     }
+    Reset();
+  }
+
+  if(ButtonPressed(3)){
+    State = 5;
+  }
+
+  if(MotionDetected()){
+    LastMovementTimer = millis()/1000;
+  }
+
+    
+  if(millis()/1000-DistanceResetTimer > 5){
+    NormalDistance = GetDistance();
+    DistanceResetTimer = millis()/1000;
+  }
+
+  //temperature updater (every 1000ms)
+  if(millis()/1000-temptimer >= 1){
+    GetTemperature();
+    temptimer = millis()/1000;
   }
 
   // -- Loop based on State
@@ -130,17 +173,7 @@ void NormalMode(){
 
   //Check if motion is detected and change to active
   if(MotionDetected()){
-    //State = 1;
-  }
-
-  if(GetMagneticState()){
-    State = 2;
-  }
-
-  //temperature updater (every 1000ms)
-  if(millis()/1000-temptimer >= 1){
-    GetTemperature();
-    temptimer = millis()/1000;
+    State = 1;
   }
 }
 
@@ -151,7 +184,29 @@ void NotSure(){
   SetColorLight(255,255,255);
   String mystate = GetState();
   ShowMessage(mystate, 0);
-  ShowMessage(" ", 1);
+  //ShowMessage(" ", 1);
+  
+  if(notsuretimer == 0) notsuretimer = millis()/1000;
+  if(millis()/1000-notsuretimer > MaxPeeTime){
+    PossibleActions[0] = false;
+  }
+
+  if(GetMagneticState() == false) SeatWasClosed = true;
+
+  if(GetMagneticState() && SeatWasClosed){
+    PossibleActions[1] = false;
+  }
+
+  if(NoMovement() > NoMovementActivateTime){
+    PossibleActions[2] = false;
+    if(PossibleActions[0]) PossibleActions[1] = false;
+  }
+
+  for(int i = 0; i < 3; i++){
+    if(PossibleActions[i] == true && PossibleActions[(i+1)%3] == false && PossibleActions[(i+2)%3] == false){
+      State = i+2;
+    }
+  }
 }
 
 
@@ -161,7 +216,11 @@ void Number1(){
   SetColorLight(0,255,0);
   String mystate = GetState();
   ShowMessage(mystate, 0);
-  ShowMessage(" ", 1);
+  //ShowMessage(" ", 1);
+  
+  if(NoMovement() > NoMovementActivateTime){
+    State = 5;
+  }
 }
 
 
@@ -171,7 +230,11 @@ void Number2(){
   SetColorLight(0,0,255);
   String mystate = GetState();
   ShowMessage(mystate, 0);
-  ShowMessage(" ", 1);
+  //ShowMessage(" ", 1);
+
+  if(NoMovement() > NoMovementActivateTime){
+    State = 5;
+  }
 }
 
 
@@ -181,7 +244,11 @@ void CleaningToilet(){
   SetColorLight(255,255,0);
   String mystate = GetState();
   ShowMessage(mystate, 0);
-  ShowMessage(" ", 1);
+  //ShowMessage(" ", 1);
+
+  if(NoMovement() > NoMovementActivateTime){
+    State = 5;
+  }
 }
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -190,7 +257,17 @@ void Trigger(){
   SetColorLight(255,0,255);
   String mystate = GetState();
   ShowMessage(mystate, 0);
-  ShowMessage(" ", 1);
+  //ShowMessage(" ", 1);
+
+  if(PossibleActions[0] == true){
+    Spray(1);
+  }
+  else if(PossibleActions[1] == true){
+    Spray(2);
+  }
+  else if(PossibleActions[2] == true){
+    Spray(0);
+  }
 }
 
 
@@ -198,12 +275,16 @@ void Trigger(){
 //When in settings mode
 void Settings(){
   SetColorLight(0,255,255);
+  
+  //Make sure motor doesn't accidentally get triggered
+  digitalWrite(MotorPin, LOW);
+  SprayTimer = 0;
 
   //Change back to normal mode after 5 seconds of not pressing any settings button
   if(millis()/1000-settingstimer > 5){
     settings = 0;
     settingstimer = 0;
-    State = 0;
+    Reset();
   }
 
   if(settings == 1){
@@ -216,21 +297,32 @@ void Settings(){
     }
   }
   else if(settings == 2){
-    ShowMessage("Change Spraying delay",0);
-    ShowMessage(String(SprayingDelay+15), 1);
+    ShowMessage("Spraying delay",0);
+    ShowMessage(String(SprayingDelay+15) + " seconds", 1);
 
     if(ButtonPressed(2)){
       SprayingDelay = (SprayingDelay+1)%10;
       settingstimer = millis()/1000;
     }
   }
-    
+
+  //if you want to add more settings increase it in the loop
   else if(settings == 3){
-    ShowMessage("Settings3", 0);
-    ShowMessage(" ",1);
+    ShowMessage("Pee Spray Count", 0);
+    ShowMessage(String(PeeSprayCount),1);
 
     if(ButtonPressed(2)){
-      //do something
+      PeeSprayCount = (PeeSprayCount+1)%4;
+      settingstimer = millis()/1000;
+    }
+  }
+
+  else if(settings == 4){
+    ShowMessage("Poo Spray Count", 0);
+    ShowMessage(String(PooSprayCount),1);
+
+    if(ButtonPressed(2)){
+      PooSprayCount = (PooSprayCount+1)%4;
       settingstimer = millis()/1000;
     }
   }
@@ -240,15 +332,14 @@ void Settings(){
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //Function to spray x times
 void Spray(int amount){
-  if(SprayTimer == 0) SprayTimer = millis();
-  if(millis() > SprayTimer +  SprayingDelay*1000){
+  if(SprayTimer == 0) SprayTimer = millis()/1000;
+  if(millis()/1000 > SprayTimer + SprayingDelay){
     digitalWrite(MotorPin, HIGH);
   }
-  if(millis() > SprayTimer + 20000*amount +  SprayingDelay*1000){
+  if(millis()/1000 > SprayTimer + 18*amount +  SprayingDelay){
     digitalWrite(MotorPin, LOW);
-    SpraysLeft--;
-    SprayTimer = 0;
-    State = 0;
+    SpraysLeft -= amount;
+    Reset();
   }
 }
 
@@ -258,7 +349,7 @@ void Spray(int amount){
 float GetTemperature(){
   sensors.requestTemperatures();
   float temperature = sensors.getTempCByIndex(0);
-  ShowMessage(String(temperature),1);
+  ShowMessage(String(temperature) + char(223) +"C  " + String(SpraysLeft),1);
   return temperature;
 }
 
@@ -323,6 +414,13 @@ void SetColorLight(int R, int G, int B){
 
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+//Return time in seconds without movement in the toilet
+unsigned long NoMovement(){
+  return millis()/1000-LastMovementTimer;
+}
+
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //Function to show message on the LCD
 void ShowMessage(String x, int line){ //Show message on the LCD
   bool reset = false;
@@ -377,6 +475,21 @@ bool ButtonPressed(int button){
     return false;
   }
   return false;
+}
+
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+//Reset Function
+void Reset(){
+  SeatWasClosed = false;
+
+  for(int i=0; i < 3; i++){
+    PossibleActions[i] = true;
+  }
+
+  notsuretimer = 0;
+  SprayTimer = 0;
+  State = 0;
 }
 
 
