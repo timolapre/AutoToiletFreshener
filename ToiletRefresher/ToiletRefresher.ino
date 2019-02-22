@@ -21,7 +21,7 @@ int settings = 0;           //0 = not in settings mode. >0 = in settings mode.
 int settingstimer = 0;      //Auto turn off settings when button is not pressed for x seconds
 
 //Buttons
-const int ButtonPin1 = 8, ButtonPin2 = 9, ButtonPin3 = 10;
+const int ButtonsPin = A0;
 bool Button1Pressed = false, Button2Pressed = false, Button3Pressed = false;
 
 //motion sensor
@@ -34,7 +34,7 @@ const int MotorPin = 13;
 const int MagnetPin = 12;
 
 //Distance sensor
-const int DistanceEchoPin, DistanceTrigPin;
+const int DistanceEchoPin = 8, DistanceTrigPin = 9;
 
 //Light sensor
 const int LightPin = A1;
@@ -57,8 +57,8 @@ unsigned long DistanceResetTimer = 0;
 bool PossibleActions[3] = {true, true, true}; //in order: Pee, Poo, Cleaning (or other)
 
 //Other
-const float MaxPeeTime = 120; //Max pee time in seconds. If it takes longer than x seconds it's not peeing anymore
-const float NoMovementActivateTime = 60; //If there is x seconds no movement then activate something
+float MaxPeeTime = 120; //Max pee time in seconds. If it takes longer than x seconds it's not peeing anymore
+const float NoMovementActivateTime = 30; //If there is x seconds no movement then activate something
 float NormalDistance;
 int PeeSprayCount = 1;
 int PooSprayCount = 2;
@@ -74,9 +74,7 @@ void setup() {
   lcd.begin(16,2);
 
   //pinModes
-  pinMode(ButtonPin1, INPUT);
-  pinMode(ButtonPin2, INPUT);
-  pinMode(ButtonPin3, INPUT);
+  pinMode(ButtonsPin, INPUT_PULLUP);
   
   pinMode(MotionPin, INPUT);
   
@@ -101,11 +99,12 @@ void setup() {
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //Loop Function
 void loop() {
-
-  Serial.print(PossibleActions[0]);
-  Serial.print(PossibleActions[1]);
-  Serial.print(PossibleActions[2]);
-  Serial.println(" " + String(millis()/1000-notsuretimer) + "  " + String(NoMovement()));
+  //Test prints on serial monitor
+  //Serial.print(PossibleActions[0]);
+  //Serial.print(PossibleActions[1]);
+  //Serial.print(PossibleActions[2]);
+  //Serial.println(" " + String(millis()/1000-notsuretimer) + "  " + String(NoMovement()));
+  //Serial.println(analogRead(ButtonsPin));
   
   // -- Change State based on inputs
   //SettingsMode
@@ -122,12 +121,11 @@ void loop() {
   if(ButtonPressed(3)){
     State = 5;
   }
-
+ 
   if(MotionDetected()){
     LastMovementTimer = millis()/1000;
   }
 
-    
   if(millis()/1000-DistanceResetTimer > 5){
     NormalDistance = GetDistance();
     DistanceResetTimer = millis()/1000;
@@ -285,6 +283,7 @@ void Settings(){
     settings = 0;
     settingstimer = 0;
     Reset();
+    State = 0;
   }
 
   if(settings == 1){
@@ -340,6 +339,7 @@ void Spray(int amount){
     digitalWrite(MotorPin, LOW);
     SpraysLeft -= amount;
     Reset();
+    State = 0;
   }
 }
 
@@ -444,29 +444,30 @@ void ShowMessage(String x, int line){ //Show message on the LCD
 //---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //Check if a certain button is pressed (there are 3 buttons)
 bool ButtonPressed(int button){
+  int analogread = analogRead(ButtonsPin);
   if(button == 1){
-    if(digitalRead(ButtonPin1) == HIGH){
+    if(analogread < 100){
       Button1Pressed = true;
     }
-    if(Button1Pressed && digitalRead(ButtonPin1) == LOW){
+    if(Button1Pressed && analogread > 900){
       Button1Pressed = false;
       return true;
     }
   }
   else if(button == 2){
-    if(digitalRead(ButtonPin2) == HIGH){
+    if(analogread > 200 && analogread < 300){
       Button2Pressed = true;
     }
-    if(Button2Pressed && digitalRead(ButtonPin2) == LOW){
+    if(Button2Pressed && analogread > 900){
       Button2Pressed = false;
       return true;
     }
   }
   else if(button == 3){
-    if(digitalRead(ButtonPin3) == HIGH){
+    if(analogread > 350 && analogread < 450){
       Button3Pressed = true;
     }
-    if(Button3Pressed && digitalRead(ButtonPin3) == LOW){
+    if(Button3Pressed && analogread > 900){
       Button3Pressed = false;
       return true;
     }
@@ -489,7 +490,6 @@ void Reset(){
 
   notsuretimer = 0;
   SprayTimer = 0;
-  State = 0;
 }
 
 
