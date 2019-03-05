@@ -309,7 +309,7 @@ void Settings() {
   SprayTimer = 0;
 
   //Change back to normal mode after 5 seconds of not pressing any settings button
-  if (millis() / 1000 - settingstimer > 5) {
+  if (millis() / 1000 - settingstimer > 7) {
     settings = 0;
     settingstimer = 0;
     Reset();
