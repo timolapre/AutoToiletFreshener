@@ -1,2 +1,2 @@
-# AutoToiletRefresher
-Automtic toilet refresher built with an arduino
+# AutoToiletFreshener
+Automtic toilet freshener built with an arduino
